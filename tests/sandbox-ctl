@@ -1,0 +1,192 @@
+#!/usr/bin/python
+#
+# Copyright 2015 Midokura SARL
+# 
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+# 
+#    http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+import os
+import traceback
+
+from docker.errors import APIError
+import yaml
+import docker.utils
+from docker import Client
+
+cli = Client(base_url='unix://var/run/docker.sock')
+
+MMM_CONF_KEYS = [
+]
+
+HOST_CONF_KEYS = [
+    'binds',
+    'port_bindings',
+    'lxc_conf',
+    'publish_all_ports',
+    'links',
+    'privileged',
+    'dns',
+    'dns_search',
+    'volumes_from',
+    'network_mode',
+    'restart_policy',
+    'cap_add',
+    'cap_drop',
+    'extra_hosts',
+    'read_only',
+    'pid_mode',
+    'ulimits'
+]
+
+DOCKER_CONF_KEYS = [
+    'cap_add',
+    'cap_drop',
+    'cpu_shares',
+    'cpuset',
+    'command',
+    'detach',
+    'devices',
+    'dns',
+    'dns_search',
+    'domainname',
+    'entrypoint',
+    'env_file',
+    'environment',
+    'extra_hosts',
+    'read_only',
+    'hostname',
+    'image',
+    'labels',
+    'links',
+    'mem_limit',
+    'name',
+    'net',
+    'log_driver',
+    'pid',
+    'ports',
+    'privileged',
+    'restart',
+    'security_opt',
+    'stdin_open',
+    'tty',
+    'user',
+    'volumes',
+    'volumes_from',
+    'working_dir',
+]
+
+CONTAINER_CONF_KEYS = list(set(DOCKER_CONF_KEYS).difference(HOST_CONF_KEYS))
+
+
+def _check_container_keys(config):
+    allowed_keys = MMM_CONF_KEYS + DOCKER_CONF_KEYS + HOST_CONF_KEYS
+    for k, _ in config.items():
+        if k not in allowed_keys:
+            raise ValueError("Key %s not allowed." % k)
+
+
+def _get_filtered_config(config, allowed_keys):
+    return {k: v
+            for k, v in config.items()
+            if k in allowed_keys}
+
+
+def up(config):
+    for container_config in config:
+        start(container_config)
+
+def down(config):
+    for container_config in config:
+        stop(container_config)
+
+
+def start(container_config):
+    try:
+        _container_config = _get_filtered_config(container_config, CONTAINER_CONF_KEYS)
+        _host_config = _get_filtered_config(container_config, HOST_CONF_KEYS)
+        if 'binds' in _host_config:
+            new_binds = dict()
+            for path, binding in _host_config['binds'].items():
+                real_path = os.getcwd() + '/../' + path
+                new_binds[real_path] = binding
+            _host_config['binds'] = new_binds
+        _host_config = docker.utils.create_host_config(**_host_config)
+        _container_config['host_config'] = _host_config
+        cli.create_container(**_container_config)
+        cli.start(_container_config['name'])
+    except Exception:
+        print "ERROR: "
+        print traceback.print_exc()
+        stop(container_config)
+
+
+def stop(container_config):
+    try:
+        print "Stopping %s..." % container_config['name']
+        cli.stop(container_config['name'])
+        cli.remove_container(container_config['name'])
+    except APIError as e:
+        print "WARNING: " + e.explanation
+
+
+def dump(config):
+    import pprint
+    print pprint.pprint(config)
+
+def read_config(config_file, cmd_args = {}):
+    topology = yaml.load_all(open(os.getcwd() + '/' + config_file))
+    templates = topology.next()['templates']
+    instances = topology.next()
+    instances_list = []
+    for instance_label, instance_def in instances.items():
+        local_template = {k: v for k, v in instance_def.items() if 'instances' not in k}
+        local_instances = instance_def['instances']
+        for local_instance in local_instances:
+            instance = dict(templates[instance_label])
+            instance.update(local_template)
+            instance.update(local_instance)
+            instance.update(cmd_args)
+            instances_list.append(instance)
+
+    return instances_list
+
+from argparse import ArgumentParser
+
+if __name__ == '__main__':
+    parser = ArgumentParser()
+    parser.add_argument('-c', '--config',
+                        metavar="topology.yaml",
+                        required=True,
+                        help="YAML file with the topology.")
+    subparser = parser.add_subparsers(title="commands",
+                                      help="mmm-ctl [command] -h for additional help")
+    parser_start_all = subparser.add_parser('up',
+                                            description="Start all services defined",
+                                            help="Start all services defined")
+    parser_start_all.set_defaults(func=up)
+
+    parser_stop_all = subparser.add_parser('down',
+                                           description="Stop all services defined",
+                                           help="Stop all services defined")
+    parser_stop_all.set_defaults(func=down)
+
+    parser_dump = subparser.add_parser('dump',
+                                       description="Dumps the parsed configuration.",
+                                       help="Dumps the parsed configuration for the final instances")
+    parser_dump.set_defaults(func=dump)
+
+
+    args = parser.parse_args()
+    config = read_config(args.config)
+    args.func(config)
+    # action=store_true for options without arguments
+#    import ipdb; ipdb.set_trace()

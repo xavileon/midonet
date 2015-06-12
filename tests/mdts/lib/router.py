@@ -109,7 +109,11 @@ class Router(ResourceBase):
     def clear_ports(self):
         """delete all ports on this router"""
         for key in self._ports:
-            self._ports[key].destroy()
+            try:
+                self._ports[key].destroy()
+            except:
+                # The port might have been deleted before
+                pass
         self._ports = {}
 
     def get_port(self, port_id):

@@ -27,7 +27,6 @@ VTM = VirtualTopologyManager('../topologies/mmm_virtual_test_chains.yaml')
 BM = BindingManager(PTM, VTM)
 
 
-
 binding_onehost = {
     'description': 'on single MM',
     'bindings': [
@@ -51,17 +50,6 @@ binding_multihost = {
               'host_id': 2, 'interface_id': 1}},
         ]
     }
-
-
-def setup():
-    PTM.build()
-    VTM.build()
-
-
-def teardown():
-    time.sleep(2)
-    PTM.destroy()
-    VTM.destroy()
 
 
 @attr(version="v1.2.0", slow=False)
@@ -99,13 +87,10 @@ def test_filter_ipv6():
                                 ipv6_proto, ipv6_icmp)
     rcv_filter = 'ether dst %s' % iface2_hw_addr
 
-
     # Sceneario 1:
     f1 = async_assert_that(iface2, receives(rcv_filter, within_sec(5)))
-    time.sleep(1)
     f2 = iface1.send_ether(packet, count=3)
     wait_on_futures([f1, f2])
-
 
     # Scenario 2:
     # setting chain and make sure it's dropped
@@ -115,19 +100,19 @@ def test_filter_ipv6():
     f1 = async_assert_that(iface2,
                            should_NOT_receive(
                                rcv_filter, within_sec(5)))
-    time.sleep(1)
     f2 = iface1.send_ether(packet, count=3)
     wait_on_futures([f1, f2])
 
     # Remove the filter and verify that packets go through again.
     VTM.get_bridge('bridge-000-001').set_inbound_filter(None)
     f1 = async_assert_that(iface2, receives(rcv_filter, within_sec(5)))
-    time.sleep(1)
     f2 = iface1.send_ether(packet, count=3)
     wait_on_futures([f1, f2])
 
+
 @attr(version="v1.2.0", slow=False)
-@bindings(binding_onehost, binding_multihost)
+@bindings(binding_onehost)
+#@bindings(binding_onehost, binding_multihost)
 def test_dst_mac_masking():
     """
     Title: Test destination MAC masking in chain rules
@@ -146,27 +131,26 @@ def test_dst_mac_masking():
     if1 = BM.get_iface_for_port('bridge-000-001', 1)
     if2 = BM.get_iface_for_port('bridge-000-001', 2)
 
-    if1_hw_addr = if1.interface['hw_addr']
-    if2_hw_addr = if2.interface['hw_addr']
+    if1_hw_addr = if1.get_mac_addr()#interface['hw_addr']
+    if2_hw_addr = if2.get_mac_addr()#interface['hw_addr']
 
     if2_ip_addr = if2.get_ip()
 
     rcv_filter = 'udp and ether src %s' % if1_hw_addr
 
     bridge.set_inbound_filter(VTM.get_chain('drop_multicast'))
-
     # Send a frame to an arbitrary multicast address. Bridge doesn't
     # recognize it and will try to flood it to the other port, but the
     # masked MAC rule should drop it since it has the multicast bit set.
     f1 = async_assert_that(if2, should_NOT_receive(rcv_filter, within_sec(5)))
-    time.sleep(1)
-    f2 = if1.send_udp("01:23:45:67:89:ab", if2_ip_addr, 41)
+    #time.sleep(1)
+    f2 = if1.send_udp("01:23:45:67:89:ab", if2_ip_addr)
     wait_on_futures([f1, f2])
 
-    ## If2's actual MAC address should work, since it doesn't have the bit set.
+    # If2's actual MAC address should work, since it doesn't have the bit set.
     f1 = async_assert_that(if2, receives(rcv_filter, within_sec(5)))
-    time.sleep(1)
-    f2 = if1.send_udp(if2_hw_addr, if2_ip_addr, 41)
+    #time.sleep(1)
+    f2 = if1.send_udp(if2_hw_addr, if2_ip_addr)
     wait_on_futures([f1, f2])
 
     # Change to the chain that allows only multicast addresses.
@@ -176,16 +160,17 @@ def test_dst_mac_masking():
     # recognize it and will try to flood it to the other port. This
     # time the rule should allow it through.
     f1 = async_assert_that(if2, receives(rcv_filter, within_sec(5)))
-    time.sleep(1)
-    f2 = if1.send_udp("01:23:45:67:89:ab", if2_ip_addr, 41)
+    #time.sleep(1)
+    f2 = if1.send_udp("01:23:45:67:89:ab", if2_ip_addr)
     wait_on_futures([f1, f2])
 
     # If2's actual MAC address should be blocked, since it doesn't
     # have the multicast bit set.
     f1 = async_assert_that(if2, should_NOT_receive(rcv_filter, within_sec(5)))
-    time.sleep(1)
-    f2 = if1.send_udp(if2_hw_addr, if2_ip_addr, 41)
+    #time.sleep(1)
+    f2 = if1.send_udp(if2_hw_addr, if2_ip_addr)
     wait_on_futures([f1, f2])
+
 
 @attr(version="v1.2.0", slow=False)
 @bindings(binding_onehost)

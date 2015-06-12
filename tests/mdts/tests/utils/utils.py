@@ -16,28 +16,27 @@
 Utility functions for functional tests.
 """
 
-from hamcrest import assert_that
-from hamcrest import is_
-from hamcrest import less_than
-
-from midonetclient.api import MidonetApi
-
-from mdts.lib.tenants import list_tenants
-from mdts.tests.config import IP_ZOOKEEPER_HOSTS
-from mdts.tests.config import MIDONET_API_URL
-
-
 import inspect
 import logging
 import os
 import subprocess
 import time
 
+from hamcrest import assert_that
+from hamcrest import is_
+from hamcrest import less_than
+
+from mdts.lib.tenants import list_tenants
+from mdts.tests.utils.conf import IP_ZOOKEEPER_HOSTS
+from mdts.tests.utils.conf import TEST_TENANT_NAME_PREFIX
+from mdts.services import service
 from mdts.lib import subprocess_compat
+from mdts.tests.utils.conf import is_vxlan_enabled
 
 FORMAT = '%(asctime)-15s %(module)s#%(funcName)s(%(lineno)d) %(message)s'
 logging.basicConfig(format=FORMAT, level=logging.DEBUG)
 LOG = logging.getLogger(__name__)
+
 
 def wait_on_futures(futures):
     """ Takes a list of futures and wait on their results. """
@@ -45,7 +44,58 @@ def wait_on_futures(futures):
 
 
 def get_midonet_api():
-    return MidonetApi(MIDONET_API_URL, 'admin','*')
+    return service.load_all('midonet-api')[0].get_midonet_api()
+
+
+# def setup_test_environment():
+#     """
+#     Initialitzation for functional tests. Moved here because the
+#     setup and teardown methods in package __init__.py is only called
+#     when running tests from discovery (not calling the module directly).
+#     This needs to be changed to a smarted way of calling initialization
+#     and teardown methods.
+#     :return:
+#     """
+#
+#     # Check that all midolman hosts are up and running
+#     # (registered to midonet-api)
+#     check_all_midolman_hosts(True)
+#
+#     # TODO: allow flexible tunnel zone specification
+#     # Add all midonet-agent hosts to the same tunnel zone
+#     hosts = service.load_all(container_type='midonet-agent')
+#     midonet_api = get_midonet_api()
+#
+#     if is_vxlan_enabled():
+#         tz = midonet_api.add_vxlan_tunnel_zone()
+#     else:
+#         tz = midonet_api.add_gre_tunnel_zone()
+#         tz.name('mdts-test')
+#         tz.create()
+#
+#         for host in hosts:
+#             tz_host = tz.add_tunnel_zone_host()
+#             tz_host.ip_address(host.get_ip_address())
+#             tz_host.host_id(host.get_midonet_host_id())
+#             tz_host.create()
+#
+# def teardown_test_environment():
+#     """
+#     Teardown method at the tests module level (shutdown)
+#     Removes nodes from the tunnel zone and the tunnel zone itself.
+#     :return:
+#     """
+#
+#     # Remove the virtual topology created during the test
+#     clear_physical_topology()
+#     clear_virtual_topology_for_tenants(
+#         tenant_name_prefix=TEST_TENANT_NAME_PREFIX)
+#
+#     midonet_api = get_midonet_api()
+#     tzs = midonet_api.get_tunnel_zones()
+#     tz = filter(lambda t: t.get_name() == 'mdts-test', tzs)
+#     tz.delete()
+
 
 #
 # ``failures'' introduces another decorator @failures which can be used to
@@ -247,16 +297,16 @@ def get_midolman_script_dir():
     return get_top_dir() + '/mmm/scripts/midolman'
 
 
-def start_midolman_agents():
-    """Starts all Midolman agents."""
-    subprocess_compat.check_output(
-        'cd %s; ./start' % get_midolman_script_dir(), shell=True)
+#def start_midolman_agents():
+#    """Starts all Midolman agents."""
+#    subprocess_compat.check_output(
+#        'cd %s; ./start' % get_midolman_script_dir(), shell=True)
 
 
-def stop_midolman_agents():
-    """Stops all Midolman agents."""
-    subprocess_compat.check_output(
-        'cd %s; ./stop' % get_midolman_script_dir(), shell=True)
+#def stop_midolman_agents():
+#    """Stops all Midolman agents."""
+#    subprocess_compat.check_output(
+#        'cd %s; ./stop' % get_midolman_script_dir(), shell=True)
 
 
 def check_all_midolman_hosts(alive):

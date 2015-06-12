@@ -19,7 +19,7 @@ from mdts.lib.failure.no_failure import NoFailure
 from mdts.lib.failure.netif_failure import NetifFailure
 from mdts.lib.failure.pkt_failure import PktFailure
 
-from mdts.tests.config import NS_BGP_PEERS
+from mdts.tests.utils.conf import NS_BGP_PEERS
 from mdts.tests.utils.asserts import *
 from mdts.tests.utils import *
 

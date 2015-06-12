@@ -69,17 +69,8 @@ bindings3 = {
                     'host_id': 2, 'interface_id': 2}}]}
 
 
-def setup():
-    PTM.build()
-    VTM.build()
-    # wait for stp to warm up and start forwarding
+def setup_wait():
     time.sleep(30)
-
-
-def teardown():
-    time.sleep(5)
-    PTM.destroy()
-    VTM.destroy()
 
 
 def _ping_from_mn(midoVmIface, exHostIface, count=3, do_arp=False):
@@ -89,6 +80,7 @@ def _ping_from_mn(midoVmIface, exHostIface, count=3, do_arp=False):
                                   within_sec(20)))
     wait_on_futures([f1])
 
+
 def _ping_to_mn(midoVmIface, exHostIface, count=3, do_arp=False):
 
     exHostIface.clear_arp(sync=True)
@@ -97,12 +89,14 @@ def _ping_to_mn(midoVmIface, exHostIface, count=3, do_arp=False):
                                       within_sec(5)))
     wait_on_futures([f1])
 
+
 def _send_random_udp_to_mn(midoVmIface, exHostIface, count=3):
 
     exHostIface.send_udp(midoVmIface.get_mac_addr(), '172.16.0.1', 28,
                          src_port=random.randint(61000, 65000),
                          dst_port=random.randint(61000, 65000),
                          count=count, sync=True)
+
 
 def _test_resiliency_from_transient_loop(ping, midoVmIface, exHostIface):
     """
@@ -142,8 +136,10 @@ def _test_resiliency_from_transient_loop(ping, midoVmIface, exHostIface):
         #
         ping(midoVmIface, exHostIface, count=5, do_arp=True)
 
+
 @attr(version="v1.2.0")
 @bindings(bindings1, bindings2, bindings3)
+@with_setup(setup_wait, lambda: None)
 def test_icmp_from_mn():
     """
     Title: ICMP reachability from MidoNet VLAN
@@ -157,7 +153,7 @@ def test_icmp_from_mn():
     """
 
     midoVmIface = BM.get_iface_for_port('bridge-000-001-0001', 1)
-    exHostIface = BM.get_iface(4,1)
+    exHostIface = BM.get_iface(4, 1)
 
     # Wait for the peer bridge to block one of the trunks and
     # make sure Midonet has recovered from a transient loop.
@@ -165,6 +161,7 @@ def test_icmp_from_mn():
 
 @attr(version="v1.2.0")
 @bindings(bindings1, bindings2, bindings3)
+@with_setup(setup_wait, lambda: None)
 def test_icmp_to_mn():
     """
     Title: ICMP reachability to MidoNet VLAN
@@ -227,6 +224,7 @@ def _test_failover_on_ifdown_with_icmp_from_mn():
 
 @attr(version="v1.2.0")
 @bindings(bindings1, bindings2, bindings3)
+@with_setup(setup_wait, lambda: None)
 def test_failover_on_ifdown_with_icmp_from_mn():
     """
     Title: Failover on Network Interface Down
@@ -251,6 +249,7 @@ def _test_failover_on_ifdown_with_icmp_to_mn():
 
 @attr(version="v1.2.0", slow=True)
 @bindings(bindings1, bindings2, bindings3)
+@with_setup(setup_wait, lambda: None)
 def test_failover_on_ifdown_with_icmp_to_mn():
     """
     Title: Failover on Network Interface Down
@@ -281,6 +280,7 @@ def _test_failover_on_generic_failure_with_icmp_from_mn():
 
 @attr(version="v1.2.0")
 @bindings(bindings1, bindings2, bindings3)
+@with_setup(setup_wait, lambda: None)
 def test_failover_on_generic_failure_with_icmp_from_mn():
     """
     Title: Failover on Generic Network Failure
@@ -312,6 +312,7 @@ def _test_failover_on_generic_failure_with_icmp_to_mn():
 
 @attr(version="v1.2.0", slow=True)
 @bindings(bindings1, bindings2, bindings3)
+@with_setup(setup_wait, lambda: None)
 def test_failover_on_generic_failure_with_icmp_to_mn():
     """
     Title: Failover on Generic Network Failure
@@ -345,6 +346,7 @@ def _test_failback(test_failover, ping, migrate=None):
 
 @attr(version="v1.2.0", slow=True)
 @bindings(bindings1, bindings2, bindings3)
+@with_setup(setup_wait, lambda: None)
 def test_failback_on_ifdown_with_icmp_from_mn():
     """
     Title: Failover on Network Interface Down / Failback
@@ -355,6 +357,7 @@ def test_failback_on_ifdown_with_icmp_from_mn():
 
 @attr(version="v1.2.0", slow=True)
 @bindings(bindings1, bindings2, bindings3)
+@with_setup(setup_wait, lambda: None)
 def test_failback_on_ifdown_with_icmp_to_mn():
     """
     Title: Failover on Network Interface Down / Failback
@@ -365,6 +368,7 @@ def test_failback_on_ifdown_with_icmp_to_mn():
 
 @attr(version="v1.2.0", slow=True)
 @bindings(bindings1, bindings2, bindings3)
+@with_setup(setup_wait, lambda: None)
 def test_failback_on_generic_failure_with_icmp_from_mn():
     """
     Title: Failover on Generic Network Failure / Failback
@@ -375,6 +379,7 @@ def test_failback_on_generic_failure_with_icmp_from_mn():
 
 @attr(version="v1.2.0", slow=True)
 @bindings(bindings1, bindings2, bindings3)
+@with_setup(setup_wait, lambda: None)
 def test_failback_on_generic_failure_with_icmp_to_mn():
     """
     Title: Failover on Generic Network Failure / Failback

@@ -14,6 +14,7 @@
 
 from hamcrest.core import assert_that
 from nose.plugins.attrib import attr
+from nose.tools import with_setup
 
 from mdts.lib.binding_manager import BindingManager
 from mdts.lib.physical_topology_manager import PhysicalTopologyManager
@@ -98,25 +99,193 @@ binding_multihost = {
     ]
 }
 
-def setup():
-    PTM.build()
-    VTM.build()
 
-def teardown():
+
+
+################################ Helper methods
+
+def assert_non_sticky_traffic_succeeds():
+    global NON_STICKY_VIP
+    assert_traffic_to(NON_STICKY_VIP, receives)
+
+
+def assert_non_sticky_traffic_fails():
+    global NON_STICKY_VIP
+    assert_traffic_to(NON_STICKY_VIP, should_NOT_receive)
+
+
+def assert_sticky_traffic_succeeds():
+    global STICKY_VIP
+    assert_traffic_to(STICKY_VIP, receives)
+
+
+def assert_sticky_traffic_fails():
+    global STICKY_VIP
+    assert_traffic_to(STICKY_VIP, should_NOT_receive)
+
+
+def assert_traffic_to(vip, assertion):
+    backend_if = get_backend_if(1)
+    source_ports = {NON_STICKY_VIP: 10108, STICKY_VIP:10109}
+    source_port = source_ports[vip]
+    recv_filter = 'dst host 10.0.2.1 and src port %s and tcp' % source_port
+
+    dst_ip, dst_port = vip
+    sender_router_port = VTM.get_router('router-000-001').get_port(1)
+    sender_router_mac = sender_router_port.get_mn_resource().get_port_mac()
+    # 41 bytes = 20 min IPv4 header + 20 min TCP header + 1 "trivial-test-udp"
+    f1 = SENDER.send_tcp(sender_router_mac, dst_ip, 41,
+                         src_port=source_port, dst_port=dst_port)
+    f2 = async_assert_that(backend_if, assertion(recv_filter,
+                                   within_sec(5)))
+    wait_on_futures([f1, f2])
+
+
+def disable_and_assert_traffic_fails(action_fun):
+    global STICKY_VIP, NON_STICKY_VIP
+    # Do action
+    action_fun("disable")
+
+    # Make one request to the non sticky loadbalancer IP, should fail
+    assert_web_request_fails_to(NON_STICKY_VIP)
+
+    # Make one request to the sticky loadbalancer IP, should fail
+    assert_web_request_fails_to(STICKY_VIP)
+
+
+def enable_and_assert_traffic_succeeds(action_fun):
+    global STICKY_VIP, NON_STICKY_VIP
+    # Do action
+    action_fun("enable")
+
+    # Make one request to the non sticky loadbalancer IP, should succeed
+    assert_web_request_succeeds_to(NON_STICKY_VIP)
+
+    # Make one request to the sticky loadbalancer IP, should succeed
+    assert_web_request_succeeds_to(STICKY_VIP)
+
+
+def backend_ip_port(num):
+    base_port = 10001
+    return '10.0.2.%s' % num, base_port + num
+
+
+def get_backend_if(num):
+    return BM.get_iface_for_port('bridge-000-002', num)
+
+
+def action_loadbalancer(fun_name):
+    first_pool_member = VTM.find_pool_member(backend_ip_port(1))
+    lb = first_pool_member._pool._load_balancer
+    getattr(lb, fun_name)()
+
+
+def action_vips(fun_name):
+    global STICKY_VIP
+    global NON_STICKY_VIP
+    for current_vip in [STICKY_VIP, NON_STICKY_VIP]:
+        vip = VTM.find_vip(current_vip)
+        getattr(vip, fun_name)()
+
+
+def action_pool(fun_name):
+    first_pool_member = VTM.find_pool_member(backend_ip_port(1))
+    pool = first_pool_member._pool
+    getattr(pool, fun_name)()
+
+
+def action_pool_members(fun_name):
+    global NUM_BACKENDS
+    for backend_num in range(1, NUM_BACKENDS + 1):
+        pool_member = VTM.find_pool_member(backend_ip_port(backend_num))
+        getattr(pool_member, fun_name)()
+
+
+# FIXME: do not use globals, sure there's a cleaner way
+def start_web_servers():
     global web_servers
-    # Stop web servers if any
-    for ws in web_servers:
-        ws.kill()
-    web_servers = []
+    global NUM_BACKENDS
+
+    # Start web servers, send gratuitous arp replies
+    # then wait for arp replies to propagate and web servers to start
+    router_port = VTM.get_router('router-000-001').get_port(2)
+    router_mac = router_port.get_mn_resource().get_port_mac()
+
+    for backend_num in range(1, NUM_BACKENDS + 1):
+        backend_ip, backend_port = backend_ip_port(backend_num)
+        backend_if = get_backend_if(backend_num)
+        # FIXME: remove when we use random macs
+        # When we switch bindings, router's ARP table will still keep
+        # the IP <> Mac mapping from previous test, so we send gratuitous
+        # ARP from receiver to avoid this issue
+        backend_if.send_arp_reply(backend_if.get_mac_addr(), router_mac,
+                                  backend_ip, '10.0.2.254')
+        backend_if.start_server(backend_port)
+        web_servers.append(backend_if)
 
     time.sleep(2)
-    PTM.destroy()
-    VTM.destroy()
+
+
+def stop_web_servers():
+    global web_servers
+    global NUM_BACKENDS
+
+    for backend_if in web_servers:
+        import ipdb; ipdb.set_trace()
+        backend_if.stop_server()
+
+#    for backend_num in range(1, NUM_BACKENDS + 1):
+#        backend_ip, backend_port = backend_ip_port(backend_num)
+#        backend_if = get_backend_if(backend_num)
+
+
+def assert_web_request_succeeds_to(dest):
+    global SENDER
+    global SRC_PORT
+    result_future = SENDER.make_web_request_to(dest, SRC_PORT, timeout_secs=5)
+    SRC_PORT += 1
+    assert result_future.result(timeout=10) is not None
+
+
+def assert_web_request_fails_to(dest):
+    global SENDER
+    global SRC_PORT
+    result_future = SENDER.make_web_request_to(dest, SRC_PORT, timeout_secs=5)
+    SRC_PORT += 1
+    assert result_future.exception(timeout=10) is not None
+
+
+def make_n_requests_to(num_reqs, dest):
+    global SENDER
+    global SRC_PORT
+    results = []
+    for x in range(0, num_reqs):
+        LOG.debug("making request using src port %r", SRC_PORT)
+        SENDER.make_request_to(dest, )
+        res = SENDER.make_web_request_get_backend(dest, SRC_PORT)
+        SRC_PORT += 1
+        results.append(res)
+    return results
+
+
+def num_uniques(l):
+    uniques = set()
+    for item in l:
+        uniques.add(item)
+    return len(uniques)
+
+
+@bindings(binding_multihost)
+@with_setup(start_web_servers, stop_web_servers)
+def test_a():
+    pass
+
 
 @attr(version="v1.3.0", slow=False)
 # Commented out as a workaround for MNA-108
 #@bindings(binding_onehost, binding_multihost)
 @bindings(binding_multihost)
+@with_setup(start_web_servers, stop_web_servers)
 def test_multi_member_loadbalancing():
     """
     Title: Balances traffic correctly when multiple pool members are active,
@@ -175,6 +344,7 @@ def test_multi_member_loadbalancing():
 
 @attr(version="v1.3.0", slow=False)
 @bindings(binding_onehost, binding_multihost)
+@with_setup(start_web_servers, stop_web_servers)
 def test_disabling_topology_loadbalancing():
     """
     Title: Balances traffic correctly when loadbalancer topology elements
@@ -217,6 +387,7 @@ def test_disabling_topology_loadbalancing():
 
 @attr(version="v1.3.0", slow=False)
 @bindings(binding_onehost, binding_multihost)
+@with_setup(start_web_servers, stop_web_servers)
 def test_long_connection_loadbalancing():
     """
     Title: Balances traffic correctly when topology changes during a long running connection.
@@ -267,145 +438,3 @@ def test_long_connection_loadbalancing():
     assert_sticky_traffic_fails()
 
     action_loadbalancer("enable")
-
-################################ Helper methods
-
-def assert_non_sticky_traffic_succeeds():
-    global NON_STICKY_VIP
-    assert_traffic_to(NON_STICKY_VIP, receives)
-
-def assert_non_sticky_traffic_fails():
-    global NON_STICKY_VIP
-    assert_traffic_to(NON_STICKY_VIP, should_NOT_receive)
-
-def assert_sticky_traffic_succeeds():
-    global STICKY_VIP
-    assert_traffic_to(STICKY_VIP, receives)
-
-def assert_sticky_traffic_fails():
-    global STICKY_VIP
-    assert_traffic_to(STICKY_VIP, should_NOT_receive)
-
-def assert_traffic_to(vip, assertion):
-    backend_if = get_backend_if(1)
-    source_ports = {NON_STICKY_VIP: 10108, STICKY_VIP:10109}
-    source_port = source_ports[vip]
-    recv_filter = 'dst host 10.0.2.1 and src port %s and tcp' % source_port
-
-    dst_ip, dst_port = vip
-    sender_router_port = VTM.get_router('router-000-001').get_port(1)
-    sender_router_mac = sender_router_port.get_mn_resource().get_port_mac()
-    # 41 bytes = 20 min IPv4 header + 20 min TCP header + 1 "trivial-test-udp"
-    f1 = SENDER.send_tcp(sender_router_mac, dst_ip, 41,
-                         src_port=source_port, dst_port=dst_port)
-    f2 = async_assert_that(backend_if, assertion(recv_filter,
-                                   within_sec(5)))
-    wait_on_futures([f1, f2])
-
-
-def disable_and_assert_traffic_fails(action_fun):
-    global STICKY_VIP, NON_STICKY_VIP
-    # Do action
-    action_fun("disable")
-
-    # Make one request to the non sticky loadbalancer IP, should fail
-    assert_web_request_fails_to(NON_STICKY_VIP)
-
-    # Make one request to the sticky loadbalancer IP, should fail
-    assert_web_request_fails_to(STICKY_VIP)
-
-def enable_and_assert_traffic_succeeds(action_fun):
-    global STICKY_VIP, NON_STICKY_VIP
-    # Do action
-    action_fun("enable")
-
-    # Make one request to the non sticky loadbalancer IP, should succeed
-    assert_web_request_succeeds_to(NON_STICKY_VIP)
-
-    # Make one request to the sticky loadbalancer IP, should succeed
-    assert_web_request_succeeds_to(STICKY_VIP)
-
-def backend_ip_port(num):
-    base_port = 10001
-    return '10.0.2.%s' % num, base_port + num
-
-def get_backend_if(num):
-    return BM.get_iface_for_port('bridge-000-002', num)
-
-def action_loadbalancer(fun_name):
-    first_pool_member = VTM.find_pool_member(backend_ip_port(1))
-    lb = first_pool_member._pool._load_balancer
-    getattr(lb, fun_name)()
-
-def action_vips(fun_name):
-    global STICKY_VIP
-    global NON_STICKY_VIP
-    for current_vip in [STICKY_VIP, NON_STICKY_VIP]:
-        vip = VTM.find_vip(current_vip)
-        getattr(vip, fun_name)()
-
-def action_pool(fun_name):
-    first_pool_member = VTM.find_pool_member(backend_ip_port(1))
-    pool = first_pool_member._pool
-    getattr(pool, fun_name)()
-
-def action_pool_members(fun_name):
-    global NUM_BACKENDS
-    for backend_num in range(1, NUM_BACKENDS + 1):
-        pool_member = VTM.find_pool_member(backend_ip_port(backend_num))
-        getattr(pool_member, fun_name)()
-
-def start_web_servers():
-    global web_servers
-    global NUM_BACKENDS
-
-    # Start web servers, send gratuitous arp replies
-    # then wait for arp replies to propagate and web servers to start
-    router_port = VTM.get_router('router-000-001').get_port(2)
-    router_mac = router_port.get_mn_resource().get_port_mac()
-
-    for backend_num in range(1, NUM_BACKENDS + 1):
-        backend_ip, backend_port = backend_ip_port(backend_num)
-        backend_if = get_backend_if(backend_num)
-        # When we switch bindings, router's ARP table will still keep
-        # the IP <> Mac mapping from previous test, so we send gratuitous
-        # ARP from receiver to avoid this issue
-        f = backend_if.send_arp_reply(backend_if.get_mac_addr(), router_mac,
-                           backend_ip, '10.0.2.254')
-        wait_on_futures([f])
-        ws = backend_if.start_web_server(backend_port)
-        web_servers.append(ws)
-
-    time.sleep(2)
-
-def assert_web_request_succeeds_to(dest):
-    global SENDER
-    global SRC_PORT
-    result_future = SENDER.make_web_request_to(dest, SRC_PORT, timeout_secs=5)
-    SRC_PORT += 1
-    assert result_future.result(timeout=10) is not None
-
-def assert_web_request_fails_to(dest):
-    global SENDER
-    global SRC_PORT
-    result_future = SENDER.make_web_request_to(dest, SRC_PORT, timeout_secs=5)
-    SRC_PORT += 1
-    assert result_future.exception(timeout=10) is not None
-
-def make_n_requests_to(num_reqs, dest):
-    global SENDER
-    global SRC_PORT
-    results = []
-    for x in range(0, num_reqs):
-        LOG.debug("making request using src port %r", SRC_PORT)
-        res = SENDER.make_web_request_get_backend(dest, SRC_PORT)
-        SRC_PORT += 1
-        results.append(res)
-    return results
-
-def num_uniques(l):
-    uniques = set()
-    for item in l:
-        uniques.add(item)
-    return len(uniques)
-

@@ -78,10 +78,10 @@ do
             ;;
         t)
             TEST=$OPTARG
-            if [[ $TEST != mdts.tests.functional_tests* ]]
-            then
-                TEST="mdts.tests.functional_tests.$TEST"
-            fi
+            #if [[ $TEST != mdts.tests.functional_tests* ]]
+            #then
+            #    TEST="mdts.tests.functional_tests.$TEST"
+            #fi
 
             TESTS="$TESTS $TEST"
             ;;

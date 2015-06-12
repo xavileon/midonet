@@ -15,6 +15,7 @@
 """
 Tests if Midolman agent / interface status update
 """
+import random
 
 from hamcrest import assert_that
 from hamcrest import none
@@ -22,10 +23,12 @@ from hamcrest import not_none
 from nose.plugins.attrib import attr
 
 from mdts.lib.physical_topology_manager import PhysicalTopologyManager
+from mdts.services import service
 from mdts.tests.utils.utils import get_midonet_api
-from mdts.tests.utils.utils import start_midolman_agents
-from mdts.tests.utils.utils import stop_midolman_agents
-from mdts.tests.utils.utils import check_all_midolman_hosts
+# FIXME: remove these from mdts.tests.utils, no longer necessary
+#from mdts.tests.utils.utils import start_midolman_agents
+#from mdts.tests.utils.utils import stop_midolman_agents
+#from mdts.tests.utils.utils import check_all_midolman_hosts
 
 import time
 
@@ -55,15 +58,23 @@ def test_host_status():
     Then: restarts all Midolman agetns,
     And: check again if all Midolman agents are alive,
     """
-    check_all_midolman_hosts(alive=True)
+    agents = service.load_all('midonet-agent')
+    for agent in agents:
+        assert agent.get_service_status() == 'up'
 
-    stop_midolman_agents()
-    time.sleep(5)
-    check_all_midolman_hosts(alive=False)
+    for agent in agents:
+        agent.stop(wait=True)
 
-    start_midolman_agents()
-    time.sleep(30)
-    check_all_midolman_hosts(alive=True)
+    for agent in agents:
+        assert agent.get_service_status() == 'down'
+
+    for agent in agents:
+        agent.start(wait=True)
+
+    # FIXME: remove this timeout if tests pass
+    # time.sleep(30)
+    for agent in agents:
+        assert agent.get_service_status() == 'up'
 
 
 def get_interface(midonet_api, host_name, interface_name):
@@ -80,13 +91,15 @@ def get_interface(midonet_api, host_name, interface_name):
     """
     host = None
     for h in midonet_api.get_hosts():
-        if h.get_id() == host_name: host = h
+        if h.get_id() == host_name:
+            host = h
     # No matching host found. Return None.
-    if not host: return None
+    if not host:
+        return None
 
     interface = None
     for i in host.get_interfaces():
-        if i.get_name() == interface_name:
+        if interface_name in i.get_name():
             interface = i
             break
 
@@ -103,17 +116,27 @@ def test_new_interface_becomes_visible():
     Then: adds a new interface,
     And: Midolman detects a new interface.
     """
+
+    # FIXME: pick the midonet-agent from binding manager (when parallel)
     midonet_api = get_midonet_api()
+    agent = service.load_from_name('midonet-agent-1')
+    iface_name = 'interface%d' % random.randint(1, 100)
     new_interface = get_interface(
-            midonet_api, '00000000-0000-0000-0000-000000000001', 'interface_01')
+        midonet_api,
+        agent.get_midonet_host_id(),
+        iface_name)
     # Test that no interface with name 'interface_01' exists.
-    assert_that(new_interface, none(), 'interface interface_01')
+    assert_that(new_interface, none(), iface_name)
 
     # Create a new interface 'interface_01'.
-    PTM.build()
+    iface = agent.create_vmguest(ifname=iface_name)
     time.sleep(5)
-
     new_interface = get_interface(
-            midonet_api, '00000000-0000-0000-0000-000000000001', 'interface_01')
+        midonet_api,
+        agent.get_midonet_host_id(),
+        iface_name)
+
     # Test that the created interface is visible.
-    assert_that(new_interface, not_none(), 'interface interface_01.')
+    assert_that(new_interface, not_none(), iface_name)
+
+    agent.destroy_vm(iface)

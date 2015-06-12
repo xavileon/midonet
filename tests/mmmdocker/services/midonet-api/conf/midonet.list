@@ -1,0 +1,2 @@
+deb [arch=amd64] http://repo.midonet.org/midonet/v2015.03 stable main
+deb [arch=amd64] http://repo.midonet.org/misc stable main

@@ -1,0 +1,111 @@
+# Templates for hosts
+templates:
+    zookeeper:
+        image: midonet/zookeeper:mmm-3.4.5
+        privileged: true
+        labels:
+          interface: mdts.services.zookeeper.ZookeeperHost # python interface for mdts
+          type: zookeeper # optional
+    cassandra:
+        image: midonet/cassandra:mmm-dsc20
+        privileged: true
+        labels:
+          interface: mdts.services.cassandra.CassandraHost
+          type: cassandra
+    midonet-api:
+        image: midonet/midonet-api:mmm
+        volumes:
+          - /midonet-api-package
+          - /python-midonetclient-package
+        binds:
+          midonet-api/build/packages:
+            bind: /midonet-api-package
+            ro: False
+          python-midonetclient/:
+            bind: /python-midonetclient-package
+            ro: False
+        labels:
+          interface: mdts.services.midonet_api.MidonetApiHost
+          type: midonet-api
+    midonet-agent:
+        image: midonet/midonet-agent:mmm
+        privileged: true
+        volumes:
+          - /midonet-agent-package
+        binds:
+          midolman/build/packages:
+            bind: /midonet-agent-package
+            ro: False
+        labels:
+          interface: mdts.services.midonet_agent.MidonetAgentHost
+          type: midonet-agent
+    external-host:
+        image: ubuntu:14.04
+        net: "none"
+        labels:
+          interface: mdts.services.service.Service
+          type: external-host
+---
+# Host types
+
+# Zookeeper cluster
+zookeeper: # Will pick template of the same name
+    instances:
+    - name: zookeeper-1
+      hostname: zookeeper-1
+      volumes:
+        - /zoo/conf/
+      environment:
+        - ZOO_ID=1
+    - name: zookeeper-2
+      hostname: zookeeper-1
+      volumes_from:
+        - zookeeper-1
+      environment:
+        - ZOO_ID=2
+    - name: zookeeper-3
+      hostname: zookeeper-3
+      volumes_from:
+        - zookeeper-1
+      environment:
+        - ZOO_ID=3
+      links:
+        zookeeper-1: zookeeper-1
+        zookeeper-2: zookeeper-2
+
+# Cassandra cluster
+cassandra:
+    instances:
+    - name: cassandra-1
+    - name: cassandra-2
+      links:
+        cassandra-1: cassandra-1
+
+# Midonet-api host
+midonet-api:
+    instances:
+    - name: midonet-api
+      links:
+        zookeeper-1: zookeeper-1
+        zookeeper-2: zookeeper-2
+        zookeeper-3: zookeeper-3
+
+# Midonet-agent hosts
+midonet-agent:
+    links:
+      zookeeper-1: zookeeper-1
+      zookeeper-2: zookeeper-2
+      zookeeper-3: zookeeper-3
+      cassandra-1: cassandra-1
+      midonet-api: midonet-api
+    instances:
+      - name: midonet-agent-1
+      - name: midonet-agent-2
+      - name: midonet-agent-3
+
+# External hosts that connects through GW (bgp, l2gw, vxgw)
+external-host:
+    instances:
+      - name: external-host-1
+      - name: external-host-2
+

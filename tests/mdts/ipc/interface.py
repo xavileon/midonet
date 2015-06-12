@@ -92,7 +92,7 @@ class LocalInterfaceProvider:
 
     @handle_sync
     def expect(self, pcap_filter_string, timeout, sync=False):
-        return  EXECUTOR.submit(self._proxy.expect, pcap_filter_string,
+        return EXECUTOR.submit(self._proxy.expect, pcap_filter_string,
                                 timeout)
 
     @handle_sync

@@ -346,7 +346,7 @@ class Netns(object):
             stdout, stderr = p.communicate()
             retcode = p.poll()
 
-            LOG.debug('output=%r', stdout)
+            LOG.debug('retcode= %d, output=%r, stderr=%s' %(retcode, stdout, stderr))
 
             # Retcode will return non-zero if the timeout passed and no packet came
             if retcode:

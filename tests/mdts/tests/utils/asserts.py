@@ -33,30 +33,39 @@ class InterfaceExpects(BaseMatcher):
     def __init__(self, expected, pcap_filter_string, timeout):
         self._expected = expected
         self._filter = pcap_filter_string
-        self._timeout = timeout # in sec
+        self._timeout = timeout  # in sec
         self._iface = None
 
     def _matches(self, iface):
+        self._iface = iface
         result = iface.expect(self._filter, self._timeout).result()
-        LOG.debug("Result=" + str(result) + " / Expected=" + str(self._expected))
+        LOG.debug("[%s] " % iface +
+                  "Result = " + str(result) +
+                  " / Expected = " + str(self._expected))
         return result == self._expected
 
     def describe_to(self, description):
-        description.append_text('should not ' if not self._expected else '')\
-                   .append_text('receives packet with tcpdump by ')\
-                   .append_text('filter=%r' % self._filter )\
+        description.append_text('Interface %s ' % str(self._iface))\
+                   .append_text('SHOULD NOT ' if not self._expected
+                                else 'SHOULD ')\
+                   .append_text('receive packet with tcpdump by ')\
+                   .append_text('filter=%r ' % self._filter)\
                    .append_text('within %d sec' % self._timeout)
 
     def describe_mismatch(self, item, mismatch_description):
-        mismatch_description.append_description_of(item)\
-                            .append_text("did")\
-                            .append_text(" not" if self._expected else "")
+        mismatch_description.append_text('Interface %s ' % str(self._iface))\
+                            .append_text('did ')\
+                            .append_text('not ' if self._expected else '')\
+                            .append_text('receive a packet.')
+
 
 def receives(pcap_filter_string, timeout=3):
     return InterfaceExpects(True, pcap_filter_string, timeout)
 
+
 def should_NOT_receive(pcap_filter_string, timeout=3):
     return InterfaceExpects(False, pcap_filter_string, timeout)
+
 
 def receives_icmp_unreachable_for_udp(udp_src_ip,
                                       udp_dst_ip,
@@ -89,17 +98,16 @@ def receives_icmp_unreachable_for_udp(udp_src_ip,
 def async_assert_that(*args):
 
     iface = args[0]
-    iface_concrete = iface._delegate._proxy._concrete
-    ifname = iface_concrete._get_ifname()
-    nsname = iface_concrete._get_nsname()
 
+    ifname = iface.get_vm_ifname()
+    nsname = 'vm'+iface.get_vm_id()
     """ Returns future of assert_that(*args)"""
     f = EXECUTOR.submit(assert_that, *args)
 
-    LOG.debug('Scheduled tcpdump on interface %s on ns: %s' % (ifname, nsname))
-    iface_concrete._tcpdump_sem.acquire()
+    LOG.debug('Scheduled tcpdump on interface %s on vm: %s' % (ifname, nsname))
+    iface._tcpdump_sem.acquire()
 
-    LOG.debug('Assert ready on interface %s on ns %s' % (ifname, nsname))
+    LOG.debug('Assert ready on interface %s on vm %s' % (ifname, nsname))
     return f
 
 def within_sec(sec):

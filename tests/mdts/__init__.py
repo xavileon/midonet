@@ -1,4 +1,4 @@
-# Copyright 2014 Midokura SARL
+# Copyright 2015 Midokura SARL
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,3 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from mdts.services import service
+from mdts.tests.utils import check_all_midolman_hosts
+from ConfigParser import SafeConfigParser
+import os
+
+
+def setup_package():
+    """
+    Setup method at the tests module level (init)
+    :return:
+    """
+    # Read configuration
+    conf_file = os.getenv('MDTS_CONF_FILE', 'mdts.conf')
+    config = SafeConfigParser()
+    config.read(conf_file)
+
+    # TODO: Check all services (not only midolman) are online
+
+    check_all_midolman_hosts(True)
