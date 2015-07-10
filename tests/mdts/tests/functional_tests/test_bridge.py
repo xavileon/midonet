@@ -194,9 +194,9 @@ def test_dhcp():
 # WORKAROUND: Fail nodes in reverse order.
 @attr(version="v1.2.0", slow=False)
 @failures(NoFailure(),
-          ServiceFailure('zookeeper-1'),
-          ServiceFailure('zookeeper-2'),
-          ServiceFailure('zookeeper-3'))
+          ServiceFailure('zookeeper', 1),
+          ServiceFailure('zookeeper', 2),
+          ServiceFailure('zookeeper', 3))
 @bindings(bindings1, bindings2)
 def test_icmp():
     """

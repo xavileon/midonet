@@ -201,16 +201,6 @@ class Service(object):
         raise NotImplementedError()
 
 
-def load_from_config(container_config):
-    container = cli.inspect_container(container_config['name'])
-    return load_from_id(container['Id'])
-
-
-def load_from_name(container_name):
-    container_info = cli.inspect_container(container_name)
-    return load_from_id(container_info['Id'])
-
-
 def load_from_id(container_id):
     container_info = cli.inspect_container(container_id)
     fqn = container_info['Config']['Labels']['interface']
@@ -222,8 +212,12 @@ def load_from_id(container_id):
 
 loaded_containers = {}
 
+def get_container(container_type, id=1):
+    # FIXME: this comes from legacy ids in bindings starting from 1
+    return loaded_containers[container_type][id-1]
+
 # FIXME: this factory is not the best option, quick hack
-def load_all(container_type=None):
+def get_all_containers(container_type=None):
     global loaded_containers
     if loaded_containers:
         if container_type:
@@ -238,4 +232,4 @@ def load_all(container_type=None):
         containers.setdefault(current_type, []).append(container_instance)
     return containers
 
-loaded_containers = load_all()
+loaded_containers = get_all_containers()

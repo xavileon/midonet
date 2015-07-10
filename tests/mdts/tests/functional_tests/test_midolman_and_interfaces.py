@@ -58,7 +58,7 @@ def test_host_status():
     Then: restarts all Midolman agetns,
     And: check again if all Midolman agents are alive,
     """
-    agents = service.load_all('midonet-agent')
+    agents = service.get_all_containers('midolman')
     for agent in agents:
         assert agent.get_service_status() == 'up'
 
@@ -119,7 +119,7 @@ def test_new_interface_becomes_visible():
 
     # FIXME: pick the midonet-agent from binding manager (when parallel)
     midonet_api = get_midonet_api()
-    agent = service.load_from_name('midonet-agent-1')
+    agent = service.get_container('midonet-agent', 1)
     iface_name = 'interface%d' % random.randint(1, 100)
     new_interface = get_interface(
         midonet_api,

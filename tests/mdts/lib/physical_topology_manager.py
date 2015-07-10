@@ -35,7 +35,7 @@ class PhysicalTopologyManager(TopologyManager):
         super(PhysicalTopologyManager, self).__init__(filename, data)
 
         self._hosts = self._data['physical_topology'].get('hosts')
-        self._compute_hosts = service.load_all('midonet-agent')
+        self._compute_hosts = service.get_all_containers('midolman')
         self._bridges = self._data['physical_topology'].get('bridges') or []
         self._interfaces = {}  # (host_id, interface_id) to interface map
 
@@ -61,8 +61,8 @@ class PhysicalTopologyManager(TopologyManager):
         #    if bridge['provided']:
         #        LOG.info('Skipped building bridge=%r', bridge)
 
-        hosts = service.load_all(container_type='midonet-agent')
-        midonet_api_host = service.load_all(container_type='midonet-api')[0]
+        hosts = service.get_all_containers('midolman')
+        midonet_api_host = service.get_container('midonet-api')
         midonet_api = midonet_api_host.get_midonet_api()
 
         if is_vxlan_enabled():
@@ -135,7 +135,7 @@ class PhysicalTopologyManager(TopologyManager):
         LOG.debug("destroy")
         LOG.debug('-' * 80)
 
-        midonet_api_host = service.load_all(container_type='midonet-api')[0]
+        midonet_api_host = service.get_all_containers(container_type='midonet-api')[0]
         midonet_api = midonet_api_host.get_midonet_api()
         tzs = midonet_api.get_tunnel_zones()
         mdts_tzs = filter(lambda t: t.get_name() == 'mdts-test', tzs)

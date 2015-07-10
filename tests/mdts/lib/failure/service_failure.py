@@ -24,6 +24,7 @@ from mdts.services import service
 
 LOG = logging.getLogger(__name__)
 
+
 class ServiceFailure(FailureBase):
     """Emulate a service failure by setting the interface down
 
@@ -31,10 +32,10 @@ class ServiceFailure(FailureBase):
     @interface  interface name
     @ip         ip of the zookeeper node
     """
-    def __init__(self, service_name):
-        super(ServiceFailure, self).__init__("%s failure" % service_name)
-        self.service_name = service_name
-        self.service = service.load_from_name(service_name)
+    def __init__(self, service_type, id=1):
+        super(ServiceFailure, self).__init__("%s failure" % service_type)
+        self.service_type = service_type
+        self.service = service.get_container(service_type, id)
 
     # Maybe just make Services class to inherit from FailureBase
     def inject(self):
@@ -42,4 +43,3 @@ class ServiceFailure(FailureBase):
 
     def eject(self):
         self.service.eject_failure()
-

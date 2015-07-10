@@ -70,8 +70,7 @@ class BindingManager(TopologyManager):
                 sys.exit(-1) # TODO: make this fancier
 
             mn_vport_id = mn_vport.get_id()
-            # FIXME: do not depend on the naming, discover it and do it more generic
-            host = service.load_from_name('midonet-agent-'+str(host_id))
+            host = service.get_container('midolman', host_id)
 
             # Clean up yamls or remove them completely, this is so ugly
             _host = filter(

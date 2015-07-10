@@ -44,7 +44,7 @@ def wait_on_futures(futures):
 
 
 def get_midonet_api():
-    return service.load_all('midonet-api')[0].get_midonet_api()
+    return service.get_container('midonet-api').get_midonet_api()
 
 
 # def setup_test_environment():
@@ -63,7 +63,7 @@ def get_midonet_api():
 #
 #     # TODO: allow flexible tunnel zone specification
 #     # Add all midonet-agent hosts to the same tunnel zone
-#     hosts = service.load_all(container_type='midonet-agent')
+#     hosts = service.get_all_containers(container_type='midonet-agent')
 #     midonet_api = get_midonet_api()
 #
 #     if is_vxlan_enabled():

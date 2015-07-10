@@ -201,19 +201,19 @@ def expect_return_dropped(dst_port_no):
 
 
 def stop_midolman_agents():
-    agents = service.load_all('midonet-agent')
+    agents = service.get_all_containers('midolman')
     for agent in agents:
         agent.stop(wait=True)
 
 
 def start_midolman_agents():
-    agents = service.load_all('midonet-agent')
+    agents = service.get_all_containers('midolman')
     for agent in agents:
         agent.start(wait=True)
 
 
 def restart_midolman_agents():
-    agents = service.load_all('midonet-agent')
+    agents = service.get_all_containers('midolman')
     for agent in agents:
         agent.restart(wait=True)
 
