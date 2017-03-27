@@ -404,13 +404,14 @@ class PacketWorkflow(
     }
 
     private def returnContext(context: PacketContext): Unit = {
+        val cookie = context.cookie
         context.resetContext()
         if (contextPool.size() < maxPooledContexts &&
                 contextPool.offerFirst(context)) {
-            log.debug("Returned context to pool")
+            log.debug(s"Returned context for cookie:$cookie to pool")
             metrics.contextsPooled.inc()
         } else {
-            log.debug("Pool full, allowing context to be garbage collected")
+            log.debug(s"Pool full, allowing context for cookie:$cookie to be garbage collected")
         }
     }
 
@@ -555,7 +556,7 @@ class PacketWorkflow(
 
     protected def handlePacket(packet: Packet): Unit =
         if (FlowState.isStateMessage(packet.getMatch)) {
-            handleStateMessage(packetContext(packet))
+            handleStateMessage(packet)
             packetOut(1)
         } else {
             processPacket(packet)
@@ -712,9 +713,9 @@ class PacketWorkflow(
             Simulator.simulate(context)
         }
 
-    protected def handleStateMessage(context: PacketContext): Unit = {
-        context.log.debug("Accepting a state push message")
-        replicator.accept(context.ethernet)
+    protected def handleStateMessage(packet: Packet): Unit = {
+        log.debug("Accepting a state push message")
+        replicator.accept(packet.getEthernet)
         metrics.statePacketsProcessed.mark()
     }
 
