@@ -59,6 +59,7 @@ class NativeFlowController(config: MidolmanConfig,
                                         config.datapath.maxFlowCount / numWorkers),
                                     FlowController.IndexMask)
     private val flowTable = JNI.createFlowTable(maxFlows)
+    private val indexer = JNI.createFlowTagIndexer()
     private val deleter = new FlowControllerDeleterImpl(flowProcessor,
                                                         datapathId,
                                                         meters)
@@ -67,10 +68,10 @@ class NativeFlowController(config: MidolmanConfig,
                          removeCallbacks: ArrayList[CallbackSpec],
                          expiration: Expiration): ManagedFlow = {
         ensureSpace(1)
-        val id = JNI.flowTablePutFlow(flowTable, FlowMatches.toBytes(fmatch))
-        val flow = new NativeManagedFlow(id)
+
+        val flow = addFlow(fmatch)
         flow.addCallbacks(removeCallbacks)
-        // Add tags
+        flow.addTags(flowTags)
         // Add expiration
         metrics.dpFlowsMetric.mark(1)
         flow
@@ -82,31 +83,24 @@ class NativeFlowController(config: MidolmanConfig,
                                removeCallbacks: ArrayList[CallbackSpec],
                                expiration: Expiration): ManagedFlow = {
         ensureSpace(2)
-        val flowId = JNI.flowTablePutFlow(
-            flowTable, FlowMatches.toBytes(recircMatch))
-        val flow = new NativeManagedFlow(flowId)
-        val outerFlowId = JNI.flowTablePutFlow(
-            flowTable, FlowMatches.toBytes(fmatch))
-        flow.setLinkedId(outerFlowId)
+        val flow = addFlow(recircMatch)
+        val outerFlow = addFlow(fmatch)
+        flow.setLinkedId(outerFlow.id)
         flow.addCallbacks(removeCallbacks)
-
+        flow.addTags(flowTags)
+        outerFlow.setLinkedId(flow.id)
         metrics.dpFlowsMetric.mark(2)
         flow
     }
 
     override def removeDuplicateFlow(mark: Int): Unit = {
-        val index = mark & FlowController.IndexMask
-        val id = JNI.flowTableIdAtIndex(flowTable, index)
-        if (id >= 0) {
-            val flow = new NativeManagedFlow(id)
-            if (flow.mark == mark) {
-                val linkedId = flow.linkedId
-                cbRegistry.runAndClear(flow.callbacks())
-                JNI.flowTableClearFlow(flowTable, id)
-                metrics.dpFlowsRemovedMetric.mark(1)
-                if (linkedId >= 0) {
-                    removeFlow(linkedId)
-                }
+        val flow = flowForMark(mark)
+        if (flow != null) {
+            val linkedId = flow.linkedId
+            flow.forget()
+            metrics.dpFlowsRemovedMetric.mark(1)
+            if (linkedId >= 0) {
+                removeFlow(linkedId)
             }
         }
     }
@@ -114,31 +108,64 @@ class NativeFlowController(config: MidolmanConfig,
     override def flowExists(mark: Int): Boolean = {
         val index = mark & FlowController.IndexMask
         val id = JNI.flowTableIdAtIndex(flowTable, index)
-        if (id >= 0) {
-            val flow = new NativeManagedFlow(id)
-            flow.mark == mark
-        } else {
-            false
-        }
+        id >= 0
     }
 
     override def invalidateFlowsFor(tag: FlowTag): Unit = {
+        val invalid = JNI.flowTagIndexerInvalidate(indexer, tag.toLongHash)
+        try {
+            val count = JNI.flowTagIndexerInvalidFlowsCount(invalid)
+            var i = 0
+            while (i < count) {
+                val id = JNI.flowTagIndexerInvalidFlowsGet(invalid, i)
+                removeFlow(id)
+                i += 1
+            }
+        } finally {
+            JNI.flowTagIndexerInvalidFlowsFree(invalid);
+        }
     }
 
     override def shouldProcess: Boolean = false
     override def process(): Unit = {}
 
-    private def removeFlow(id: Long): Unit = {
-        val flow = new NativeManagedFlow(id)
-        deleter.removeFlowFromDatapath(flow.flowMatch, flow.sequence)
-        val linkedId = flow.linkedId
-        cbRegistry.runAndClear(flow.callbacks())
-        JNI.flowTableClearFlow(flowTable, id)
+    private def addFlow(flowMatch: FlowMatch): NativeManagedFlow = {
+        val id = JNI.flowTablePutFlow(flowTable, FlowMatches.toBytes(flowMatch))
+        new NativeManagedFlow(id)
+    }
 
-        if (linkedId >= 0) {
-            removeFlow(linkedId)
+    private def removeFlow(id: Long): Unit = {
+        val flow = flowForId(id)
+        if (flow != null) {
+            deleter.removeFlowFromDatapath(flow.flowMatch, flow.sequence)
+            val linkedId = flow.linkedId
+            flow.forget()
+
+            if (linkedId >= 0) {
+                removeFlow(linkedId)
+            }
+            metrics.dpFlowsRemovedMetric.mark(1)
         }
-        metrics.dpFlowsRemovedMetric.mark(1)
+    }
+
+    private def flowForId(id: Long): NativeManagedFlow = {
+        val index = (id & FlowController.IndexMask).toInt
+        val idInTable = JNI.flowTableIdAtIndex(flowTable, index)
+        if (idInTable >= 0 && id == idInTable) {
+            new NativeManagedFlow(id)
+        } else {
+            null
+        }
+    }
+
+    private def flowForMark(mark: Int): NativeManagedFlow = {
+        val index = mark & FlowController.IndexMask
+        val id = JNI.flowTableIdAtIndex(flowTable, index)
+        if (id >= 0) {
+            new NativeManagedFlow(id)
+        } else {
+            null
+        }
     }
 
     private def ensureSpace(count: Int): Unit = {
@@ -148,7 +175,7 @@ class NativeFlowController(config: MidolmanConfig,
         }
     }
 
-    class NativeManagedFlow(var id: Long) extends ManagedFlow {
+    class NativeManagedFlow(val id: Long) extends ManagedFlow {
         override val flowMatch: FlowMatch =
             FlowMatches.fromBytes(JNI.flowTableFlowMatch(flowTable, id))
 
@@ -183,6 +210,21 @@ class NativeFlowController(config: MidolmanConfig,
                                              spec.id, spec.args)
                 i += 1
             }
+        }
+
+        def addTags(tags: ArrayList[FlowTag]): Unit = {
+            var i = 0
+            while (i < tags.size) {
+                JNI.flowTagIndexerIndexFlowTag(indexer, id,
+                                               tags.get(i).toLongHash)
+                i += 1
+            }
+        }
+
+        def forget(): Unit = {
+            JNI.flowTagIndexerRemoveFlow(indexer, id)
+            cbRegistry.runAndClear(callbacks())
+            JNI.flowTableClearFlow(flowTable, id)
         }
     }
 }
