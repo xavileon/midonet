@@ -22,8 +22,10 @@
 
 const std::string jba2str(JNIEnv *env, jbyteArray ba) {
   auto len = env->GetArrayLength(ba);
-  auto bytes = reinterpret_cast<const char*>(env->GetByteArrayElements(ba, 0));
-  return std::string(bytes, len);
+  auto bytes = env->GetByteArrayElements(ba, 0);
+  auto ret = std::string(reinterpret_cast<const char*>(bytes), len);
+  env->ReleaseByteArrayElements(ba, bytes, 0);
+  return ret;
 }
 
 jbyteArray str2jba(JNIEnv *env, std::string str) {
@@ -136,10 +138,17 @@ Java_org_midonet_midolman_flows_NativeFlowControllerJNI_createFlowTagIndexer
 }
 
 void
-Java_org_midonet_midolman_flows_NativeFlowControllerJNI_flowTagIndexerIndexFlowTag
-(JNIEnv *env, jclass, jlong pointer, jlong flow, jlong tag) {
+Java_org_midonet_midolman_flows_NativeFlowControllerJNI_flowTagIndexerIndexFlowTags
+(JNIEnv *env, jclass, jlong pointer, jlong flow, jlongArray tagsArray) {
   auto indexer = reinterpret_cast<FlowTagIndexer*>(pointer);
-  indexer->index_flow_tag(flow, tag);
+  auto tagCount = env->GetArrayLength(tagsArray);
+  jlong *elements = env->GetLongArrayElements(tagsArray, 0);
+  std::vector<FlowTag> tags(tagCount);
+  for (int i = 0; i < tagCount; i++) {
+    tags.push_back(elements[i]);
+  }
+  env->ReleaseLongArrayElements(tagsArray, elements, 0);
+  indexer->index_flow_tags(flow, tags);
 }
 
 void
@@ -304,18 +313,17 @@ void FlowTable::clear(FlowId id) {
   m_occupied--;
 }
 
-void FlowTagIndexer::index_flow_tag(FlowId id, FlowTag tag) {
-  auto iter = m_tags_to_flows.find(tag);
-  if (iter == m_tags_to_flows.end()) {
-    m_tags_to_flows.insert({tag, std::unordered_set<FlowId>{ id }});
-  } else {
-    iter->second.insert(id);
-  }
-  auto iter2 = m_flows_to_tags.find(id);
-  if (iter2 == m_flows_to_tags.end()) {
-    m_flows_to_tags.insert(std::make_pair(id, std::vector<FlowTag>{ tag }));
-  } else {
-    iter2->second.push_back(tag);
+void FlowTagIndexer::index_flow_tags(FlowId id, std::vector<FlowTag> tags) {
+  auto& id_iters = m_flows_to_tags[id];
+  id_iters.reserve(tags.size());
+
+  auto tagiter = tags.begin();
+  while (tagiter != tags.end()) {
+    auto tag = *tagiter;
+    auto& list = m_tags_to_flows[tag];
+    auto it = list.emplace(list.begin(), id);
+    id_iters.push_back(std::make_tuple(tag, std::reference_wrapper<FlowIdList>(list), it));
+    tagiter++;
   }
 }
 
@@ -327,7 +335,7 @@ std::vector<FlowId> FlowTagIndexer::invalidate(FlowTag tag) {
 
     auto invalidated_iter = invalidated.begin();
     while (invalidated_iter != invalidated.end()) {
-      remove_flow(*invalidated_iter);
+      remove_flow(*invalidated_iter, true, tag);
       invalidated_iter++;
     }
     return invalidated;
@@ -345,25 +353,29 @@ std::vector<FlowId> FlowTagIndexer::flows_for_tag(FlowTag tag) const {
   }
 }
 
-void FlowTagIndexer::remove_flow(FlowId id) {
+void FlowTagIndexer::remove_flow(FlowId id,
+                                 bool invalidating,
+                                 FlowTag invalidTag) {
   // find list of tags for flow
-  auto tags_for_flow_iter = m_flows_to_tags.find(id);
-  if (tags_for_flow_iter != m_flows_to_tags.end()) {
-    // iterate over list of tags for flow
-    auto tags_vector_iter = tags_for_flow_iter->second.begin();
-    while (tags_vector_iter != tags_for_flow_iter->second.end()) {
-      // lookup tag in tags -> flows map
-      auto tag_to_flow_iter = m_tags_to_flows.find(*tags_vector_iter);
-      if (tag_to_flow_iter != m_tags_to_flows.end()) {
-        tag_to_flow_iter->second.erase(id);
-        // if there's now no flows for the tag, delete tag from map
-        if (tag_to_flow_iter->second.size() == 0) {
-          m_tags_to_flows.erase(tag_to_flow_iter);
+  auto entry = m_flows_to_tags.find(id);
+  if (entry != m_flows_to_tags.end()) {
+    auto& tags_vector = entry->second;
+    auto iter = tags_vector.begin();
+    while (iter != tags_vector.end()) {
+      auto tag = std::get<0>(*iter);
+      auto& ids = std::get<1>(*iter);
+      auto id_iter = std::get<2>(*iter);
+
+      iter++;
+
+      if (!invalidating || invalidTag != tag) {
+        ids.erase(id_iter);
+        if (ids.empty()) {
+          m_tags_to_flows.erase(tag);
         }
       }
-      tags_vector_iter++;
     }
-    m_flows_to_tags.erase(tags_for_flow_iter);
+    m_flows_to_tags.erase(entry);
   }
 }
 
